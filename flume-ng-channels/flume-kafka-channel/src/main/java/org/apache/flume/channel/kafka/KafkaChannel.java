@@ -460,7 +460,10 @@ public class KafkaChannel extends BasicChannelSemantics {
     @SuppressWarnings("unchecked")
     @Override
     protected Event doTake() throws InterruptedException {
-      type = TransactionType.TAKE;
+      if (logger.isTraceEnabled()) {
+        logger.trace("Starting event take.");
+      }
+        type = TransactionType.TAKE;
       try {
         if (!(consumerAndRecords.get().uuid.equals(channelUUID))) {
           logger.info("UUID mismatch, creating new consumer");
@@ -482,11 +485,10 @@ public class KafkaChannel extends BasicChannelSemantics {
       if (!consumerAndRecords.get().failedEvents.isEmpty()) {
         e = consumerAndRecords.get().failedEvents.removeFirst();
       } else {
-
-        if (logger.isDebugEnabled()) {
-          logger.debug("Assigment: {}", consumerAndRecords.get().consumer.assignment().toString());
+        if (logger.isTraceEnabled()) {
+          logger.trace("Assignment during take: {}",
+              consumerAndRecords.get().consumer.assignment().toString());
         }
-
         try {
           long startTime = System.nanoTime();
           if (!consumerAndRecords.get().recordIterator.hasNext()) {
@@ -500,7 +502,8 @@ public class KafkaChannel extends BasicChannelSemantics {
             consumerAndRecords.get().offsets.put(tp, oam);
 
             if (logger.isTraceEnabled()) {
-              logger.trace("Took offset: {}", consumerAndRecords.get().offsets.toString());
+              logger.trace(("Current offsets: {} for channel {}",
+                  consumerAndRecords.get().offsets.toString(), channelUUID);
             }
 
             //Add the key to the header
@@ -564,14 +567,20 @@ public class KafkaChannel extends BasicChannelSemantics {
                   ex);
         }
       } else {
+        //event taken ensures that we have collected events in this transaction
+        // before committing
         if (consumerAndRecords.get().failedEvents.isEmpty() && eventTaken) {
           long startTime = System.nanoTime();
           consumerAndRecords.get().commitOffsets();
           long endTime = System.nanoTime();
           counter.addToKafkaCommitTimer((endTime - startTime) / (1000 * 1000));
-          consumerAndRecords.get().printCurrentAssignment();
+          counter.addToEventTakeSuccessCount(Long.valueOf(events.get().size()));
+
+          if (logger.isDebugEnabled()) {
+            logger.debug(consumerAndRecords.get().getCommittedOffsetsString());
+          }
         }
-        counter.addToEventTakeSuccessCount(Long.valueOf(events.get().size()));
+        consumerAndRecords.get().offsets.clear();
         events.get().clear();
       }
     }
@@ -686,25 +695,25 @@ public class KafkaChannel extends BasicChannelSemantics {
       this.consumer.commitSync(offsets);
     }
 
-    // This will reset the latest assigned partitions to the last committed offsets;
-
-    public void printCurrentAssignment() {
+    // This prints the current committed offsets when debug is enabled
+    String getCommittedOffsetsString() {
       StringBuilder sb = new StringBuilder();
+      sb.append("Channel ").append(this.uuid)
+          .append(" committed: ");
       for (TopicPartition tp : this.consumer.assignment()) {
         try {
-          sb.append("Committed: [").append(tp).append(",")
+          sb.append("[").append(tp).append(",")
               .append(this.consumer.committed(tp).offset())
-              .append(",").append(this.consumer.committed(tp).metadata()).append("]");
-          if (logger.isDebugEnabled()) {
-            logger.debug(sb.toString());
-          }
+              .append("] ");
         } catch (NullPointerException npe) {
           if (logger.isDebugEnabled()) {
             logger.debug("Committed {}", tp);
           }
         }
       }
+      return sb.toString();
     }
+
   }
 }
 
