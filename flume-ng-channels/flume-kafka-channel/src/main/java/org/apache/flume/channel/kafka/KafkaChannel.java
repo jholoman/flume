@@ -463,7 +463,7 @@ public class KafkaChannel extends BasicChannelSemantics {
       if (logger.isTraceEnabled()) {
         logger.trace("Starting event take.");
       }
-        type = TransactionType.TAKE;
+      type = TransactionType.TAKE;
       try {
         if (!(consumerAndRecords.get().uuid.equals(channelUUID))) {
           logger.info("UUID mismatch, creating new consumer");
@@ -502,8 +502,7 @@ public class KafkaChannel extends BasicChannelSemantics {
             consumerAndRecords.get().offsets.put(tp, oam);
 
             if (logger.isTraceEnabled()) {
-              logger.trace(("Current offsets: {} for channel {}",
-                  consumerAndRecords.get().offsets.toString(), channelUUID);
+              logger.trace(consumerAndRecords.get().getOffsetMapString());
             }
 
             //Add the key to the header
@@ -535,6 +534,9 @@ public class KafkaChannel extends BasicChannelSemantics {
 
     @Override
     protected void doCommit() throws InterruptedException {
+      if (logger.isTraceEnabled()) {
+        logger.trace("Starting commit.");
+      }
       if (type.equals(TransactionType.NONE)) {
         return;
       }
@@ -570,6 +572,7 @@ public class KafkaChannel extends BasicChannelSemantics {
         //event taken ensures that we have collected events in this transaction
         // before committing
         if (consumerAndRecords.get().failedEvents.isEmpty() && eventTaken) {
+          logger.trace("about to commit take.");
           long startTime = System.nanoTime();
           consumerAndRecords.get().commitOffsets();
           long endTime = System.nanoTime();
@@ -580,6 +583,7 @@ public class KafkaChannel extends BasicChannelSemantics {
             logger.debug(consumerAndRecords.get().getCommittedOffsetsString());
           }
         }
+        logger.trace("clearing offsets map");
         consumerAndRecords.get().offsets.clear();
         events.get().clear();
       }
@@ -686,13 +690,28 @@ public class KafkaChannel extends BasicChannelSemantics {
     }
 
     void poll() {
+      if (logger.isTraceEnabled()) {
+        logger.trace("polling with timeout: {}ms channel-{}", pollTimeout, channelUUID);
+      }
       this.records = consumer.poll(pollTimeout);
       this.recordIterator = records.iterator();
-      logger.trace("polling");
+      if (logger.isDebugEnabled()) {
+        logger.debug("returned {} records from last poll channel-{}", records.count(), channelUUID);
+      }
     }
 
     void commitOffsets() {
       this.consumer.commitSync(offsets);
+    }
+
+    String getOffsetMapString() {
+      StringBuilder sb = new StringBuilder();
+      sb.append("Current offsets map: ");
+      for (TopicPartition tp : offsets.keySet()) {
+        sb.append("p").append(tp.partition()).append("-")
+            .append(offsets.get(tp).offset()).append(" ");
+      }
+      return sb.toString();
     }
 
     // This prints the current committed offsets when debug is enabled
